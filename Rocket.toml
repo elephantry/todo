@@ -1,5 +1,5 @@
 [global]
 template_dir = "static"
 
-[global.databases.sqlite_database]
-url = "db/db.sqlite"
+[global.databases.psql_database]
+url = "postgresql://localhost/todo"

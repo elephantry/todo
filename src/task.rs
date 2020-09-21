@@ -1,66 +1,73 @@
-use diesel::{self, result::QueryResult, prelude::*};
-
-mod schema {
-    table! {
-        tasks {
-            id -> Nullable<Integer>,
-            description -> Text,
-            completed -> Bool,
-        }
-    }
-}
-
-use self::schema::tasks;
-use self::schema::tasks::dsl::{tasks as all_tasks, completed as task_completed};
-
-use crate::DbConn;
-
-#[table_name="tasks"]
-#[derive(serde::Serialize, Queryable, Insertable, Debug, Clone)]
+#[derive(Serialize, Debug, Clone, elephantry::Entity)]
 pub struct Task {
     pub id: Option<i32>,
     pub description: String,
     pub completed: bool
 }
 
-#[derive(Debug, FromForm)]
+struct Model;
+
+impl<'a> elephantry::Model<'a> for Model {
+    type Entity = Task;
+    type Structure = Structure;
+
+    fn new(_: &'a elephantry::Connection) -> Self {
+        Self {}
+    }
+}
+
+struct Structure;
+
+impl elephantry::Structure for Structure {
+    fn relation() -> &'static str {
+        "tasks"
+    }
+
+    fn primary_key() -> &'static [&'static str] {
+        &["id"]
+    }
+
+    fn columns() -> &'static [&'static str] {
+        &[
+            "id",
+            "description",
+            "completed",
+        ]
+    }
+}
+
+#[derive(FromForm)]
 pub struct Todo {
     pub description: String,
 }
 
 impl Task {
-    pub async fn all(conn: &DbConn) -> QueryResult<Vec<Task>> {
-        conn.run(|c| {
-            all_tasks.order(tasks::id.desc()).load::<Task>(c)
-        }).await
+    pub fn all(conn: &elephantry::Connection) -> Vec<Task> {
+        conn.find_all::<Model>(Some("order by id desc")).unwrap().collect()
     }
 
-    /// Returns the number of affected rows: 1.
-    pub async fn insert(todo: Todo, conn: &DbConn) -> QueryResult<usize> {
-        conn.run(|c| {
-            let t = Task { id: None, description: todo.description, completed: false };
-            diesel::insert_into(tasks::table).values(&t).execute(c)
-        }).await
+    pub fn insert(todo: Todo, conn: &elephantry::Connection) -> bool {
+        let t = Task { id: None, description: todo.description, completed: false };
+        conn.insert_one::<Model>(&t).is_ok()
     }
 
-    /// Returns the number of affected rows: 1.
-    pub async fn toggle_with_id(id: i32, conn: &DbConn) -> QueryResult<usize> {
-        conn.run(move |c| {
-            let task = all_tasks.find(id).get_result::<Task>(c)?;
-            let new_status = !task.completed;
-            let updated_task = diesel::update(all_tasks.find(id));
-            updated_task.set(task_completed.eq(new_status)).execute(c)
-        }).await
+    pub fn toggle_with_id(id: i32, conn: &elephantry::Connection) -> bool {
+        let mut task = match conn.find_by_pk::<Model>(&pk!(id)) {
+            Ok(Some(task)) => task,
+            _ => return false,
+        };
+
+        task.completed = !task.completed;
+
+        conn.update_one::<Model>(&pk!(id), &task).is_ok()
     }
 
-    /// Returns the number of affected rows: 1.
-    pub async fn delete_with_id(id: i32, conn: &DbConn) -> QueryResult<usize> {
-        conn.run(move |c| diesel::delete(all_tasks.find(id)).execute(c)).await
+    pub fn delete_with_id(id: i32, conn: &elephantry::Connection) -> bool {
+        conn.delete_by_pk::<Model>(&pk!(id)).is_ok()
     }
 
-    /// Returns the number of affected rows.
     #[cfg(test)]
-    pub async fn delete_all(conn: &DbConn) -> QueryResult<usize> {
-        conn.run(|c| diesel::delete(all_tasks).execute(c)).await
+    pub fn delete_all(conn: &elephantry::Connection) -> bool {
+        conn.delete_where::<Model>("1 = 1", &[]).is_ok()
     }
 }
