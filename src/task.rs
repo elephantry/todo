@@ -1,39 +1,10 @@
 #[derive(Serialize, Debug, Clone, elephantry::Entity)]
+#[elephantry(model = "Model", structure = "Structure", relation = "tasks")]
 pub struct Task {
+    #[elephantry(pk)]
     pub id: Option<i32>,
     pub description: String,
     pub completed: bool
-}
-
-struct Model;
-
-impl<'a> elephantry::Model<'a> for Model {
-    type Entity = Task;
-    type Structure = Structure;
-
-    fn new(_: &'a elephantry::Connection) -> Self {
-        Self {}
-    }
-}
-
-struct Structure;
-
-impl elephantry::Structure for Structure {
-    fn relation() -> &'static str {
-        "tasks"
-    }
-
-    fn primary_key() -> &'static [&'static str] {
-        &["id"]
-    }
-
-    fn columns() -> &'static [&'static str] {
-        &[
-            "id",
-            "description",
-            "completed",
-        ]
-    }
 }
 
 #[derive(FromForm)]
