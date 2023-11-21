@@ -1,84 +1,98 @@
-#![feature(proc_macro_hygiene, decl_macro)]
-
-#[macro_use] extern crate elephantry;
 #[macro_use] extern crate rocket;
-#[macro_use] extern crate serde_derive;
-#[macro_use] extern crate rocket_contrib;
+#[macro_use] extern crate rocket_sync_db_pools;
 
 mod task;
 #[cfg(test)] mod tests;
 
-use elephantry::Connection;
-use rocket::Rocket;
-use rocket::request::{Form, FlashMessage};
+use rocket::request::FlashMessage;
 use rocket::response::{Flash, Redirect};
-use rocket_contrib::{templates::Template, serve::StaticFiles};
+use rocket::serde::Serialize;
+use rocket::form::Form;
+use rocket::fs::{FileServer, relative};
+
+use rocket_dyn_templates::Template;
 
 use task::{Task, Todo};
 
 #[database("psql_database")]
-pub struct DbConn(Connection);
+pub struct DbConn(elephantry::Connection);
 
 #[derive(Debug, Serialize)]
-struct Context<'a, 'b>{ msg: Option<(&'a str, &'b str)>, tasks: Vec<Task> }
+#[serde(crate = "rocket::serde")]
+struct Context {
+    flash: Option<(String, String)>,
+    tasks: Vec<Task>
+}
 
-impl<'a, 'b> Context<'a, 'b> {
-    pub fn err(conn: &DbConn, msg: &'a str) -> Context<'static, 'a> {
-        Context{msg: Some(("error", msg)), tasks: Task::all(conn)}
+impl Context {
+    pub async fn err<M: std::fmt::Display>(conn: &DbConn, msg: M) -> Context {
+        Context {
+            flash: Some(("error".into(), msg.to_string())),
+            tasks: Task::all(conn).await.unwrap_or_default()
+        }
     }
 
-    pub fn raw(conn: &DbConn, msg: Option<(&'a str, &'b str)>) -> Context<'a, 'b> {
-        Context{msg: msg, tasks: Task::all(conn)}
+    pub async fn raw(conn: &DbConn, flash: Option<(String, String)>) -> Context {
+        match Task::all(conn).await {
+            Ok(tasks) => Context { flash, tasks },
+            Err(e) => {
+                error_!("DB Task::all() error: {}", e);
+                Context {
+                    flash: Some(("error".into(), "Fail to access database.".into())),
+                    tasks: vec![]
+                }
+            }
+        }
     }
 }
 
 #[post("/", data = "<todo_form>")]
-fn new(todo_form: Form<Todo>, conn: DbConn) -> Flash<Redirect> {
+async fn new(todo_form: Form<Todo>, conn: DbConn) -> Flash<Redirect> {
     let todo = todo_form.into_inner();
     if todo.description.is_empty() {
         Flash::error(Redirect::to("/"), "Description cannot be empty.")
-    } else if Task::insert(todo, &conn) {
-        Flash::success(Redirect::to("/"), "Todo successfully added.")
+    } else if let Err(e) = Task::insert(todo, &conn).await {
+        error_!("DB insertion error: {}", e);
+        Flash::error(Redirect::to("/"), "Todo could not be inserted due an internal error.")
     } else {
-        Flash::error(Redirect::to("/"), "Whoops! The server failed.")
+        Flash::success(Redirect::to("/"), "Todo successfully added.")
     }
 }
 
 #[put("/<id>")]
-fn toggle(id: i32, conn: DbConn) -> Result<Redirect, Template> {
-    if Task::toggle_with_id(id, &conn) {
-        Ok(Redirect::to("/"))
-    } else {
-        Err(Template::render("index", &Context::err(&conn, "Couldn't toggle task.")))
+async fn toggle(id: i32, conn: DbConn) -> Result<Redirect, Template> {
+    match Task::toggle_with_id(id, &conn).await {
+        Ok(_) => Ok(Redirect::to("/")),
+        Err(e) => {
+            error_!("DB toggle({}) error: {}", id, e);
+            Err(Template::render("index", Context::err(&conn, "Failed to toggle task.").await))
+        }
     }
 }
 
 #[delete("/<id>")]
-fn delete(id: i32, conn: DbConn) -> Result<Flash<Redirect>, Template> {
-    if Task::delete_with_id(id, &conn) {
-        Ok(Flash::success(Redirect::to("/"), "Todo was deleted."))
-    } else {
-        Err(Template::render("index", &Context::err(&conn, "Couldn't delete task.")))
+async fn delete(id: i32, conn: DbConn) -> Result<Flash<Redirect>, Template> {
+    match Task::delete_with_id(id, &conn).await {
+        Ok(_) => Ok(Flash::success(Redirect::to("/"), "Todo was deleted.")),
+        Err(e) => {
+            error_!("DB deletion({}) error: {}", id, e);
+            Err(Template::render("index", Context::err(&conn, "Failed to delete task.").await))
+        }
     }
 }
 
 #[get("/")]
-fn index(msg: Option<FlashMessage>, conn: DbConn) -> Template {
-    Template::render("index", &match msg {
-        Some(ref msg) => Context::raw(&conn, Some((msg.name(), msg.msg()))),
-        None => Context::raw(&conn, None),
-    })
+async fn index(flash: Option<FlashMessage<'_>>, conn: DbConn) -> Template {
+    let flash = flash.map(FlashMessage::into_inner);
+    Template::render("index", Context::raw(&conn, flash).await)
 }
 
-fn rocket() -> Rocket {
-    rocket::ignite()
+#[launch]
+fn rocket() -> _ {
+    rocket::build()
         .attach(DbConn::fairing())
-        .mount("/", StaticFiles::from("static/"))
+        .attach(Template::fairing())
+        .mount("/", FileServer::from(relative!("static")))
         .mount("/", routes![index])
         .mount("/todo", routes![new, toggle, delete])
-        .attach(Template::fairing())
-}
-
-fn main() {
-    rocket().launch();
 }

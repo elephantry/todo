@@ -1,4 +1,9 @@
+use elephantry::pk;
+use rocket::serde::Serialize;
+use crate::DbConn;
+
 #[derive(Serialize, Debug, Clone, elephantry::Entity)]
+#[serde(crate = "rocket::serde")]
 #[elephantry(model = "Model", structure = "Structure", relation = "tasks")]
 pub struct Task {
     #[elephantry(pk)]
@@ -13,32 +18,42 @@ pub struct Todo {
 }
 
 impl Task {
-    pub fn all(conn: &elephantry::Connection) -> Vec<Task> {
-        conn.find_all::<Model>(Some("order by id desc")).unwrap().collect()
+    pub async fn all(conn: &DbConn) -> elephantry::Result<Vec<Task>> {
+        conn.run(|c| {
+            c.find_all::<Model>(Some("order by id desc")).map(|x| x.collect())
+        }).await
     }
 
-    pub fn insert(todo: Todo, conn: &elephantry::Connection) -> bool {
-        let t = Task { id: None, description: todo.description, completed: false };
-        conn.insert_one::<Model>(&t).is_ok()
+    pub async fn insert(todo: Todo, conn: &DbConn) -> elephantry::Result<usize> {
+        conn.run(|c| {
+            let t = Task { id: None, description: todo.description, completed: false };
+            c.insert_one::<Model>(&t).map(|_| 1)
+        }).await
     }
 
-    pub fn toggle_with_id(id: i32, conn: &elephantry::Connection) -> bool {
-        let mut task = match conn.find_by_pk::<Model>(&pk!(id)) {
-            Ok(Some(task)) => task,
-            _ => return false,
-        };
+    pub async fn toggle_with_id(id: i32, conn: &DbConn) -> elephantry::Result<usize> {
+        conn.run(move |c| {
+            let mut task = match c.find_by_pk::<Model>(&pk!(id)) {
+                Ok(Some(task)) => task,
+                _ => return Ok(0),
+            };
 
-        task.completed = !task.completed;
+            task.completed = !task.completed;
 
-        conn.update_one::<Model>(&pk!(id), &task).is_ok()
+            c.update_one::<Model>(&pk!(id), &task).map(|_| 1)
+        }).await
     }
 
-    pub fn delete_with_id(id: i32, conn: &elephantry::Connection) -> bool {
-        conn.delete_by_pk::<Model>(&pk!(id)).is_ok()
+    pub async fn delete_with_id(id: i32, conn: &DbConn) -> elephantry::Result<usize> {
+        conn.run(move |c| {
+            c.delete_by_pk::<Model>(&pk!(id)).map(|_| 1)
+        }).await
     }
 
     #[cfg(test)]
-    pub fn delete_all(conn: &elephantry::Connection) -> bool {
-        conn.delete_where::<Model>("1 = 1", &[]).is_ok()
+    pub async fn delete_all(conn: &DbConn) -> elephantry::Result<usize> {
+        conn.run(|c| {
+            c.delete_where::<Model>("1 = 1", &[]).map(|x| x.len())
+        }).await
     }
 }
