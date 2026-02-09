@@ -10,7 +10,7 @@ rocket = "0.5"
 
 [dev-dependencies]
 parking_lot = "0.12"
-rand = "0.8"
+rand = "0.10"
 
 [dependencies.rocket_sync_db_pools]
 version = "0.1"
