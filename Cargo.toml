@@ -9,7 +9,7 @@ elephantry = { version = "5.0", features = ["rocket"] }
 rocket = "0.5"
 
 [dev-dependencies]
-parking_lot = "0.12"
+parking_lot = "0.13"
 rand = "0.10"
 
 [dependencies.rocket_sync_db_pools]
