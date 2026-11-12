@@ -3,6 +3,7 @@ name = "todo"
 version = "0.0.0"
 edition = "2024"
 publish = false
+rust-version = "1.100"
 
 [dependencies]
 elephantry = { version = "5.0", features = ["rocket"] }

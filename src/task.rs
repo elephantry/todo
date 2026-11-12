@@ -38,7 +38,7 @@ impl Task {
                 _ => return Ok(0),
             };
 
-            task.completed = !task.completed;
+            task.completed.toggle();
 
             c.update_one::<Model>(&pk!(id), &task).map(|_| 1)
         }).await
