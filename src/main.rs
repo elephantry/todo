@@ -10,7 +10,7 @@ use rocket::serde::Serialize;
 use rocket::form::Form;
 use rocket::fs::{FileServer, relative};
 
-use rocket_dyn_templates::Template;
+use rocket_dyn_templates::{Template, Templating};
 
 use task::{Task, Todo};
 
@@ -91,7 +91,7 @@ async fn index(flash: Option<FlashMessage<'_>>, conn: DbConn) -> Template {
 fn rocket() -> _ {
     rocket::build()
         .attach(DbConn::fairing())
-        .attach(Template::fairing())
+        .attach(Templating::new())
         .mount("/", FileServer::from(relative!("static")))
         .mount("/", routes![index])
         .mount("/todo", routes![new, toggle, delete])
